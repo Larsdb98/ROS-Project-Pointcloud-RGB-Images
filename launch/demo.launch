@@ -1,0 +1,14 @@
+<launch>
+
+    <!-- Point cloud (from elevation map) to rgb image overlay -->
+    <!-- The node tags should be copied onto elevation_mapping_with_realtime_RGB_height_overlay.launch once fully implemented. -->
+    <node pkg="pointcloud_rgb_image_overlay" name="pointcloud_rgb_image_overlay" type="pointcloud_rgb_image_overlay.py" output="screen">
+        <param name="~point_cloud_in_topic" value="/grid_map_visualization/elevation_points_rgb_frame" />
+        <param name="~image_in_topic" value="/wrist_camera/color/image_raw" />
+        <param name="~camera_info_topic" value="/wrist_camera/color/camera_info" />
+        <param name="~image_out_topic" value="/wrist_camera/color/elevation_map_overlayed_image_raw" />
+        <param name="~biggerPoints" value="False" />
+        <param name="~opacity" value="0.7" />
+    </node>
+
+</launch>
