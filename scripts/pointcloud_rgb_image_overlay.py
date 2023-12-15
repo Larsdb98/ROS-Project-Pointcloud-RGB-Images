@@ -28,6 +28,10 @@ import sensor_msgs.point_cloud2 as pc2
 import numpy as np
 import os
 
+# import tf2_ros
+# import tf2_py as tf2
+# from tf2_sensor_msgs.tf2_sensor_msgs import do_transform_cloud
+
 
 class PointCloudProcessor:
     def __init__(self):
@@ -35,17 +39,24 @@ class PointCloudProcessor:
 
         # private parameters need to be used to avoid accidental use with other
         # nodes. use the "~" sign in front of the name of the param.
-        self.__point_cloud_in = rospy.get_param("~point_cloud_in_topic", "/points") # /grid_map_visualization/elevation_points_rgb_frame
+        self.__transformed_point_cloud_in = rospy.get_param("~point_cloud_in_topic", "/points_transformed") # /grid_map_visualization/elevation_points_rgb_frame
+        self.__gridmap_pointcloud_in = rospy.get_param("~gridmap_pointcloud_in", "/points")
         self.__image_in = rospy.get_param("~image_in_topic", "/camera/color/image_raw") # /wrist_camera/color/image_raw
         self.__camera_info_in = rospy.get_param("~camera_info_topic", "/camera/color/camera_info") # /wrist_camera/color/camera_info
         self.__image_out = rospy.get_param("~image_out_topic", "/camera/color/elevation_map_overlayed_image_raw") # /wrist_camera/color/elevation_map_overlayed_image_raw
-        self.__biggerPoints = rospy.get_param("~biggerPoints", "True")
-        self.__opacity = rospy.get_param("~opacity", 0.0)
+        self.__biggerPoints = rospy.get_param("~biggerPoints", "2")
+        self.__min_height = rospy.get_param("~minHeight", "0.0")
+        self.__max_height = rospy.get_param("~maxHeight", "0.3")
+
+        self.__opacity = rospy.get_param("~opacity", 0.7)
 
         # Setup subscribers
-        rospy.Subscriber(self.__point_cloud_in, PointCloud2, self.point_cloud_callback)
+        rospy.Subscriber(self.__transformed_point_cloud_in, PointCloud2, self.point_cloud_callback)
         rospy.Subscriber(self.__image_in, Image, self.image_callback)
         rospy.Subscriber(self.__camera_info_in, CameraInfo, self.camera_info_callback)
+        rospy.Subscriber(self.__gridmap_pointcloud_in, PointCloud2, self.gridmap_pointcloud_in)
+        
+
 
         # Setup publisher
         self.image_pub = rospy.Publisher(self.__image_out, Image, queue_size=10)
@@ -53,6 +64,7 @@ class PointCloudProcessor:
         # Initialize message variables as attributes:
         self.camera_info = None
         self.rgb_image = None
+        self.curr_gridmap_pointcloud = None
 
         # initialize all other attributes:
 
@@ -67,12 +79,22 @@ class PointCloudProcessor:
     ################ Callbacks #################
     ############################################
 
+    def gridmap_pointcloud_in(self, pc_msg):
+        self.curr_gridmap_pointcloud = pc_msg
+
+
     def point_cloud_callback(self, pc_msg):
-        if self.camera_info is not None and self.rgb_image is not None:
+        if self.camera_info is not None and self.rgb_image is not None and self.curr_gridmap_pointcloud is not None:
             # Project point cloud onto camera pixel coordinates
             points = pc2.read_points(pc_msg, field_names=("x", "y", "z"), skip_nans = True)
             points = np.array(list(points))
             projected_points = self.project_point_cloud(points, self.camera_info)
+
+
+            gridmap_points = pc2.read_points(self.curr_gridmap_pointcloud, field_names=("x", "y", "z"), skip_nans = True)
+            gridmap_points = np.array(list(gridmap_points))
+            # print("length of pointclouds from gridmap: {}".format(len(gridmap_points)))
+            # print("length of transformed pointclouds from gridmap: {}".format(len(points)))
 
             # camera image dimensions
             img_h = self.camera_info.height
@@ -80,10 +102,10 @@ class PointCloudProcessor:
             camera_image_shape = [img_h, img_w]
             
             # Generate colormap based on Z component
-            colormap = self.generate_colormap(projected_points, points, camera_image_shape, BiggerPoints = self.__biggerPoints)
+            colormap = self.generate_colormap_single(projected_points, gridmap_points, camera_image_shape, BiggerPoints = 2)
 
             # Overlay colormap onto RGB image with adjustable opacity
-            final_image = self.overlay_colormap(self.rgb_image, colormap, opacity=0.8)
+            final_image = self.overlay_colormap(self.rgb_image, colormap, opacity=self.__opacity)
 
             # Debug: 
             if self.__EXPORT_ARRAY_TO_FILE: 
@@ -139,7 +161,123 @@ class PointCloudProcessor:
         return image_points
     
 
+    def generate_colormap_single(self, projected_points, original_points, rgb_image_shape, BiggerPoints = None):
+        # Initial declarations of variables that may be used:
+        pixel_coordinates = None
+        pixel_coordinates_2 = None
+        pixel_coordinates_3 = None
+        pixel_coordinates_4 = None
+        pixel_coordinates_5 = None
+        pixel_coordinates_6 = None
+        pixel_coordinates_7 = None
+        pixel_coordinates_8 = None
+        pixel_coordinates_9 = None
 
+        if BiggerPoints is None:
+            BiggerPoints = self.__biggerPoints
+
+        # Map normalized Z values to pixel coordinates
+        h, w = rgb_image_shape
+        # Extract Z values from the original 3D points
+        z_values = original_points[:, 2]
+
+        # Normalize Z values
+        z_values_clipped = np.clip(z_values, self.__min_height, self.__max_height)
+        normalized_z = ((z_values_clipped - self.__min_height) / (self.__max_height - self.__min_height) * 255).astype(int)
+
+        intensity_map = np.zeros((h, w), dtype = np.uint8)
+        
+        
+
+        
+        # raw_projected_points_x = (projected_points[:, 0, 0] * (w - 1)).astype(int)
+        # raw_projected_points_y = (projected_points[:, 0, 1] * (h - 1)).astype(int)
+        # raw_projected_points = [raw_projected_points_x, raw_projected_points_y]
+        # raw_projected_points = np.transpose(raw_projected_points)
+
+        if BiggerPoints == 0:
+            pixel_coordinates_x = np.clip((projected_points[:, 0, 0]).astype(int), 0, w - 1)
+            pixel_coordinates_y = np.clip((projected_points[:, 0, 1]).astype(int), 0, h - 1)
+
+            pixel_coordinates = np.vstack([pixel_coordinates_x, pixel_coordinates_y])
+            pixel_coordinates = np.transpose(pixel_coordinates)
+
+
+            # Assign color values to the corresponding pixel coordinates using the jet colormap 
+            intensity_map[pixel_coordinates[:, 1], pixel_coordinates[:, 0]] = normalized_z[:]
+
+            return intensity_map
+        
+        elif BiggerPoints == 1:
+            pixel_coordinates_x = np.clip((projected_points[:, 0, 0]).astype(int), 0, w - 1)
+            pixel_coordinates_x_plus = np.clip((projected_points[:, 0, 0] + np.ones_like(projected_points[:, 0, 0])).astype(int), 0, w - 1)
+            pixel_coordinates_x_min = np.clip((projected_points[:, 0, 0] - np.ones_like(projected_points[:, 0, 0])).astype(int), 0, w - 1)
+
+            pixel_coordinates_y = np.clip((projected_points[:, 0, 1]).astype(int), 0, h - 1)
+            pixel_coordinates_y_plus = np.clip((projected_points[:, 0, 1] + np.ones_like(projected_points[:, 0, 1])).astype(int), 0, h - 1)
+            pixel_coordinates_y_min = np.clip((projected_points[:, 0, 1] - np.ones_like(projected_points[:, 0, 1])).astype(int), 0, h - 1)
+
+
+            pixel_coordinates = np.vstack([pixel_coordinates_x, pixel_coordinates_y])
+            pixel_coordinates_2 = np.vstack([pixel_coordinates_x, pixel_coordinates_y_plus])
+            pixel_coordinates_3 = np.vstack([pixel_coordinates_x_plus, pixel_coordinates_y])
+            pixel_coordinates_4 = np.vstack([pixel_coordinates_x_plus, pixel_coordinates_y_plus])
+
+
+            pixel_coordinates = np.transpose(pixel_coordinates)
+            pixel_coordinates_2 = np.transpose(pixel_coordinates_2)
+            pixel_coordinates_3 = np.transpose(pixel_coordinates_3)
+            pixel_coordinates_4 = np.transpose(pixel_coordinates_4)     
+
+            intensity_map[pixel_coordinates[:, 1], pixel_coordinates[:, 0]] = normalized_z[:]
+            intensity_map[pixel_coordinates_2[:, 1], pixel_coordinates_2[:, 0]] = normalized_z[:]
+            intensity_map[pixel_coordinates_3[:, 1], pixel_coordinates_3[:, 0]] = normalized_z[:]
+            intensity_map[pixel_coordinates_4[:, 1], pixel_coordinates_4[:, 0]] = normalized_z[:]
+
+            return intensity_map
+
+        else:
+            pixel_coordinates_x = np.clip((projected_points[:, 0, 0]).astype(int), 0, w - 1)
+            pixel_coordinates_x_plus = np.clip((projected_points[:, 0, 0] + np.ones_like(projected_points[:, 0, 0])).astype(int), 0, w - 1)
+            pixel_coordinates_x_min = np.clip((projected_points[:, 0, 0] - np.ones_like(projected_points[:, 0, 0])).astype(int), 0, w - 1)
+
+            pixel_coordinates_y = np.clip((projected_points[:, 0, 1]).astype(int), 0, h - 1)
+            pixel_coordinates_y_plus = np.clip((projected_points[:, 0, 1] + np.ones_like(projected_points[:, 0, 1])).astype(int), 0, h - 1)
+            pixel_coordinates_y_min = np.clip((projected_points[:, 0, 1] - np.ones_like(projected_points[:, 0, 1])).astype(int), 0, h - 1)
+
+
+            pixel_coordinates = np.vstack([pixel_coordinates_x, pixel_coordinates_y])
+            pixel_coordinates_2 = np.vstack([pixel_coordinates_x, pixel_coordinates_y_plus])
+            pixel_coordinates_3 = np.vstack([pixel_coordinates_x_plus, pixel_coordinates_y])
+            pixel_coordinates_4 = np.vstack([pixel_coordinates_x_plus, pixel_coordinates_y_plus])
+            pixel_coordinates_5 = np.stack([pixel_coordinates_x_min, pixel_coordinates_y_plus])
+            pixel_coordinates_6 = np.stack([pixel_coordinates_x_min, pixel_coordinates_y])
+            pixel_coordinates_7 = np.stack([pixel_coordinates_x_min, pixel_coordinates_y_min])
+            pixel_coordinates_8 = np.stack([pixel_coordinates_x, pixel_coordinates_y_min])
+            pixel_coordinates_9 = np.stack([pixel_coordinates_x_plus, pixel_coordinates_y_min])            
+
+
+            pixel_coordinates = np.transpose(pixel_coordinates)
+            pixel_coordinates_2 = np.transpose(pixel_coordinates_2)
+            pixel_coordinates_3 = np.transpose(pixel_coordinates_3)
+            pixel_coordinates_4 = np.transpose(pixel_coordinates_4)     
+            pixel_coordinates_5 = np.transpose(pixel_coordinates_5)
+            pixel_coordinates_6 = np.transpose(pixel_coordinates_6)
+            pixel_coordinates_7 = np.transpose(pixel_coordinates_7)
+            pixel_coordinates_8 = np.transpose(pixel_coordinates_8)
+            pixel_coordinates_9 = np.transpose(pixel_coordinates_9)            
+
+            intensity_map[pixel_coordinates[:, 1], pixel_coordinates[:, 0]] = normalized_z[:]
+            intensity_map[pixel_coordinates_2[:, 1], pixel_coordinates_2[:, 0]] = normalized_z[:]
+            intensity_map[pixel_coordinates_3[:, 1], pixel_coordinates_3[:, 0]] = normalized_z[:]
+            intensity_map[pixel_coordinates_4[:, 1], pixel_coordinates_4[:, 0]] = normalized_z[:]
+            intensity_map[pixel_coordinates_5[:, 1], pixel_coordinates_5[:, 0]] = normalized_z[:]
+            intensity_map[pixel_coordinates_6[:, 1], pixel_coordinates_6[:, 0]] = normalized_z[:]
+            intensity_map[pixel_coordinates_7[:, 1], pixel_coordinates_7[:, 0]] = normalized_z[:]
+            intensity_map[pixel_coordinates_8[:, 1], pixel_coordinates_8[:, 0]] = normalized_z[:]
+            intensity_map[pixel_coordinates_9[:, 1], pixel_coordinates_9[:, 0]] = normalized_z[:]
+
+            return intensity_map
 
     def generate_colormap(self, projected_points, original_points, rgb_image_shape, BiggerPoints = True):
         # Initial declarations of variables that may be used:
@@ -165,7 +303,6 @@ class PointCloudProcessor:
 
         colormap = np.zeros((h, w, 3), dtype = np.uint8)
         
-        
 
         
         # raw_projected_points_x = (projected_points[:, 0, 0] * (w - 1)).astype(int)
@@ -173,7 +310,7 @@ class PointCloudProcessor:
         # raw_projected_points = [raw_projected_points_x, raw_projected_points_y]
         # raw_projected_points = np.transpose(raw_projected_points)
 
-        if not BiggerPoints:
+        if BiggerPoints == 0:
             pixel_coordinates_x = np.clip((projected_points[:, 0, 0]).astype(int), 0, w - 1)
             pixel_coordinates_y = np.clip((projected_points[:, 0, 1]).astype(int), 0, h - 1)
 
@@ -193,6 +330,34 @@ class PointCloudProcessor:
 
             return colormap
         
+        elif BiggerPoints == 1:
+            pixel_coordinates_x = np.clip((projected_points[:, 0, 0]).astype(int), 0, w - 1)
+            pixel_coordinates_x_plus = np.clip((projected_points[:, 0, 0] + np.ones_like(projected_points[:, 0, 0])).astype(int), 0, w - 1)
+            pixel_coordinates_x_min = np.clip((projected_points[:, 0, 0] - np.ones_like(projected_points[:, 0, 0])).astype(int), 0, w - 1)
+
+            pixel_coordinates_y = np.clip((projected_points[:, 0, 1]).astype(int), 0, h - 1)
+            pixel_coordinates_y_plus = np.clip((projected_points[:, 0, 1] + np.ones_like(projected_points[:, 0, 1])).astype(int), 0, h - 1)
+            pixel_coordinates_y_min = np.clip((projected_points[:, 0, 1] - np.ones_like(projected_points[:, 0, 1])).astype(int), 0, h - 1)
+
+
+            pixel_coordinates = np.vstack([pixel_coordinates_x, pixel_coordinates_y])
+            pixel_coordinates_2 = np.vstack([pixel_coordinates_x, pixel_coordinates_y_plus])
+            pixel_coordinates_3 = np.vstack([pixel_coordinates_x_plus, pixel_coordinates_y])
+            pixel_coordinates_4 = np.vstack([pixel_coordinates_x_plus, pixel_coordinates_y_plus])          
+
+
+            pixel_coordinates = np.transpose(pixel_coordinates)
+            pixel_coordinates_2 = np.transpose(pixel_coordinates_2)
+            pixel_coordinates_3 = np.transpose(pixel_coordinates_3)
+            pixel_coordinates_4 = np.transpose(pixel_coordinates_4)     
+
+            colormap[pixel_coordinates[:, 1], pixel_coordinates[:, 0], :] = jet_colormap[: , 0, :]
+            colormap[pixel_coordinates_2[:, 1], pixel_coordinates_2[:, 0], :] = jet_colormap[: , 0, :]
+            colormap[pixel_coordinates_3[:, 1], pixel_coordinates_3[:, 0], :] = jet_colormap[: , 0, :]
+            colormap[pixel_coordinates_4[:, 1], pixel_coordinates_4[:, 0], :] = jet_colormap[: , 0, :]
+
+            return colormap
+
         else:
             pixel_coordinates_x = np.clip((projected_points[:, 0, 0]).astype(int), 0, w - 1)
             pixel_coordinates_x_plus = np.clip((projected_points[:, 0, 0] + np.ones_like(projected_points[:, 0, 0])).astype(int), 0, w - 1)
@@ -206,7 +371,7 @@ class PointCloudProcessor:
             pixel_coordinates = np.vstack([pixel_coordinates_x, pixel_coordinates_y])
             pixel_coordinates_2 = np.vstack([pixel_coordinates_x, pixel_coordinates_y_plus])
             pixel_coordinates_3 = np.vstack([pixel_coordinates_x_plus, pixel_coordinates_y])
-            pixel_coordinates_4 = np.vstack([pixel_coordinates_x_plus, pixel_coordinates_y_plus])
+            pixel_coordinates_4 = np.vstack([pixel_coordinates_x_plus, pixel_coordinates_y_plus])       
 
 
             pixel_coordinates = np.transpose(pixel_coordinates)
@@ -228,14 +393,19 @@ class PointCloudProcessor:
         # Then use CvBridge to convert the OpenCV image into a ROS Image
         # message and publish it using the declared publisher.
 
-        gamma = 0.0
+        gray_image = cv2.cvtColor(rgb_image, cv2.COLOR_BGR2GRAY)
+        image_to_publish = np.zeros_like(rgb_image) 
+        image_to_publish[:, :, 2] = gray_image # place grayscale image on red channel. 
+        image_to_publish[:, :, 1] = colormap # place colormap on green channel
 
-        # Convert colormap to 3 channels to match RGB image
-        colormap_rgb = cv2.cvtColor(colormap, cv2.COLOR_BGR2RGB)
-        # Blend RGB image and colormap together based on opacity
-        final_image = cv2.addWeighted(rgb_image, 1 - self.__opacity, colormap_rgb, self.__opacity, gamma)
+        # gamma = 0.0
 
-        return final_image
+        # # Convert colormap to 3 channels to match RGB image
+        # colormap_rgb = cv2.cvtColor(colormap, cv2.COLOR_BGR2RGB)
+        # # Blend RGB image and colormap together based on opacity
+        # final_image = cv2.addWeighted(rgb_image, 1 - self.__opacity, colormap_rgb, self.__opacity, gamma)
+
+        return image_to_publish
     
 
 
